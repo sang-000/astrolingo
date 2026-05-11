@@ -69,3 +69,20 @@ Child Mode → simple and fun explanations
 Student Mode → educational explanations
 Researcher Mode → technical scientific explanations
 
+## 📸 Screenshots
+
+### Home Page
+![Home Page](screenshots/Home%20page.png)
+
+### Login Page
+![Login Page](screenshots/Login%20page.png)
+
+### Live News Feed
+![Live News](screenshots/Live%20news.png)
+
+### AI Learning Modes
+![AI Modes](screenshots/AI%20Learning%20Modes.png)
+
+### APOD Gallery
+![APOD Gallery](screenshots/Apod%20Gallery.png)
+
