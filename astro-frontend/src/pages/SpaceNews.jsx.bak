@@ -1,0 +1,679 @@
+// SpaceNews.jsx - Real-time NASA/ISRO News with AI Simplification
+// Complete implementation as per requirements
+
+import React, { useEffect, useState, useMemo } from "react";
+import axios from "axios";
+import DOMPurify from 'dompurify';
+
+export default function SpaceNews() {
+  // State management
+  const [articles, setArticles] = useState([]);
+  const [mode, setMode] = useState('student');
+  const [loading, setLoading] = useState(true);
+  const [simplifying, setSimplifying] = useState(false);
+  const [simplifiedContent, setSimplifiedContent] = useState({});
+  const [error, setError] = useState(null);
+  const [lastFetched, setLastFetched] = useState(null);
+  const [isRealTime, setIsRealTime] = useState(false);
+  const [expandedArticles, setExpandedArticles] = useState({});
+
+  // Fetch real-time news on component mount
+  useEffect(() => {
+    fetchRealtimeNews();
+  }, []);
+
+  // Simplify articles when mode changes
+  useEffect(() => {
+    if (articles.length > 0) {
+      // Only simplify if we haven't already simplified for this mode
+      const needsSimplification = articles.some(article => 
+        !simplifiedContent[`${article.id}_${mode}`]
+      );
+      
+      if (needsSimplification) {
+        console.log(`🔄 Simplification needed for ${mode} mode`);
+        simplifyAllArticles();
+      } else {
+        console.log(`✅ Using cached content for ${mode} mode`);
+      }
+    }
+  }, [mode, articles]);
+
+  // ===================================================================
+  // FETCH REAL-TIME NEWS FROM NASA/ISRO APIs
+  // ===================================================================
+  const fetchRealtimeNews = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      setSimplifiedContent({});
+      
+      console.log('🚀 Fetching real-time news from NASA/ISRO APIs...');
+      
+      const response = await axios.get('http://localhost:5000/api/news/realtime', {
+        params: {
+          limit: 15,
+          source: 'all'
+        },
+        timeout: 20000
+      });
+      
+      console.log('📊 API Response:', response.data);
+      
+      if (response.data.success) {
+        setArticles(response.data.articles);
+        setLastFetched(new Date(response.data.metadata.fetchedAt));
+        setIsRealTime(response.data.metadata.isRealTime);
+        
+        console.log(`✅ Loaded ${response.data.articles.length} fresh articles`);
+        console.log('📊 Metadata:', response.data.metadata);
+      } else {
+        throw new Error(response.data.error || 'Failed to fetch news');
+      }
+      
+    } catch (err) {
+      console.error('❌ Error fetching real-time news:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to fetch news');
+      setIsRealTime(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ===================================================================
+  // BATCH SIMPLIFICATION WITH HUGGINGFACE API
+  // ===================================================================
+  const simplifyAllArticles = async () => {
+    if (articles.length === 0) return;
+    
+    try {
+      setSimplifying(true);
+      
+      // Don't clear existing content to prevent UI flicker
+      // We'll merge the new content with the existing one
+      
+      console.log(`🧠 Simplifying ${articles.length} articles for ${mode} mode...`);
+      
+      // Only simplify articles that haven't been simplified for this mode yet
+      const articlesToSimplify = articles.filter(article => 
+        !simplifiedContent[`${article.id}_${mode}`]
+      );
+      
+      if (articlesToSimplify.length === 0) {
+        console.log(`✅ All articles already simplified for ${mode} mode`);
+        return;
+      }
+      
+      console.log(`📝 Processing ${articlesToSimplify.length} articles for ${mode} mode`);
+      
+      const response = await axios.post('http://localhost:5000/api/news/simplify-batch', {
+        articles: articlesToSimplify,
+        mode: mode
+      }, {
+        timeout: 60000, // 60 second timeout for batch processing
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache'
+        }
+      });
+      
+      console.log('🧠 Simplification Response:', response.data);
+      
+      if (response.data.success) {
+        // Add mode suffix to each simplified content key
+        const modeSpecificContent = {};
+        Object.entries(response.data.simplified).forEach(([id, content]) => {
+          modeSpecificContent[`${id}_${mode}`] = content;
+        });
+        
+        // Merge with existing content
+        setSimplifiedContent(prev => ({
+          ...prev,
+          ...modeSpecificContent
+        }));
+        
+        console.log(`✅ Batch simplification completed for ${mode} mode`);
+      } else {
+        throw new Error(response.data.error || 'Simplification failed');
+      }
+      
+    } catch (err) {
+      console.error('❌ Error in batch simplification:', err);
+      
+      // Fallback: use original content for articles that failed
+      const fallbackContent = {};
+      articles.forEach(article => {
+        const contentKey = `${article.id}_${mode}`;
+        if (!simplifiedContent[contentKey]) {
+          fallbackContent[contentKey] = article.description || article.content || 'Content not available';
+        }
+      });
+      
+      if (Object.keys(fallbackContent).length > 0) {
+        setSimplifiedContent(prev => ({
+          ...prev,
+          ...fallbackContent
+        }));
+      }
+      
+      // Show error toast or notification
+      setError(`Failed to simplify content: ${err.message}. Showing original content.`);
+    } finally {
+      setSimplifying(false);
+    }
+  };
+
+  // ===================================================================
+  // MODE CONFIGURATION
+  // ===================================================================
+  const modeConfig = {
+    child: {
+      icon: '👧',
+      label: 'Child',
+      description: 'Simple & Fun',
+      color: 'bg-pink-500 hover:bg-pink-600',
+      activeColor: 'bg-pink-600'
+    },
+    student: {
+      icon: '🎓',
+      label: 'Student',
+      description: 'Clear & Educational',
+      color: 'bg-blue-500 hover:bg-blue-600',
+      activeColor: 'bg-blue-600'
+    },
+    researcher: {
+      icon: '🔬',
+      label: 'Researcher',
+      description: 'Technical & Detailed',
+      color: 'bg-purple-500 hover:bg-purple-600',
+      activeColor: 'bg-purple-600'
+    }
+  };
+
+  // ===================================================================
+  // LOADING STATE
+  // ===================================================================
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="loading-spinner mx-auto mb-6 w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+          <h2 className="text-3xl font-bold text-white mb-4">🚀 Fetching Live Space News...</h2>
+          <p className="text-purple-300 mb-2">Getting the latest discoveries from NASA & ISRO APIs</p>
+          <div className="text-sm text-purple-400">
+            ⚡ Real-time data • No database cache • Fresh content
+          </div>
+          <div className="mt-4 text-xs text-gray-500">
+            This may take 3-5 seconds for fresh content...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ===================================================================
+  // ERROR STATE
+  // ===================================================================
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <div className="text-6xl mb-4">🌌</div>
+          <h2 className="text-2xl font-bold text-white mb-2">Oops! News Fetch Failed</h2>
+          <p className="text-red-400 mb-6">{error}</p>
+          <button 
+            onClick={fetchRealtimeNews}
+            className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-lg transition-colors font-medium"
+          >
+            🔄 Try Again
+          </button>
+          <p className="text-xs text-gray-500 mt-4">
+            Make sure the backend server is running on port 5000
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Toggle article expansion
+  const toggleExpand = (articleId) => {
+    setExpandedArticles(prev => ({
+      ...prev,
+      [articleId]: !prev[articleId]
+    }));
+  };
+
+  // Sanitize HTML content
+  const sanitizeContent = (html) => {
+    if (!html) return '';
+    // Remove any script tags and sanitize
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['p', 'a', 'strong', 'em', 'ul', 'ol', 'li', 'br'],
+      ALLOWED_ATTR: ['href', 'target', 'rel']
+    });
+  };
+
+  // Format date
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // Process article content
+  const processContent = (content, articleId) => {
+    if (!content) return '';
+    const cleanContent = sanitizeContent(content);
+    const isExpanded = expandedArticles[articleId];
+    const maxLength = isExpanded ? 2000 : 300;
+    
+    // If content is short enough, return as is
+    if (cleanContent.length <= maxLength) return { __html: cleanContent };
+    
+    // Otherwise, truncate and add read more
+    const truncated = cleanContent.substring(0, maxLength) + '...';
+    return { 
+      __html: isExpanded ? cleanContent : truncated
+    };
+  };
+
+  // ===================================================================
+  // MAIN COMPONENT RENDER
+  // ===================================================================
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      {/* FLOATING MODE SELECTOR */}
+      <div className="fixed top-4 right-4 z-50">
+        <div className="group relative">
+          <button 
+            className="flex items-center gap-2 bg-slate-800/80 hover:bg-slate-700/90 text-white px-4 py-2.5 rounded-full shadow-lg border border-purple-500/30 backdrop-blur-md transition-all duration-300"
+            onClick={() => document.getElementById('mode-selector')?.classList.toggle('hidden')}
+          >
+            <span className="text-xl">{modeConfig[mode].icon}</span>
+            <span className="font-medium">{modeConfig[mode].label}</span>
+            <svg className="w-4 h-4 transition-transform group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          <div id="mode-selector" className="hidden absolute right-0 mt-2 w-56 bg-slate-800/90 backdrop-blur-lg rounded-xl shadow-xl border border-slate-700/50 overflow-hidden">
+            {Object.entries(modeConfig).map(([key, config]) => (
+              <button
+                key={key}
+                onClick={() => {
+                  setMode(key);
+                  const selector = document.getElementById('mode-selector');
+                  if (selector) selector.classList.add('hidden');
+                }}
+                className={`w-full px-4 py-3 text-left flex items-center gap-3 transition-colors duration-200 ${
+                  mode === key 
+                    ? 'bg-purple-600/80 text-white' 
+                    : 'text-slate-300 hover:bg-slate-700/50'
+                }`}
+              >
+                <span className="text-xl">{config.icon}</span>
+                <div>
+                  <div className="font-medium">{config.label}</div>
+                  <div className="text-xs text-slate-300/70">{config.description}</div>
+                </div>
+                {mode === key && (
+                  <svg className="w-4 h-4 ml-auto" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      
+      {/* MAIN CONTENT */}
+      <div className="container mx-auto px-4 py-6 sm:py-8">
+        {/* HEADER */}
+        <header className="text-center mb-8">
+          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3 bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-blue-400">
+            Space News Explorer
+          </h1>
+          <div className="flex flex-wrap items-center justify-center gap-4 text-sm">
+            <div className={`px-3 py-1 rounded-full font-medium flex items-center gap-2 ${
+              isRealTime ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${isRealTime ? 'bg-green-400' : 'bg-red-400'}`}></div>
+              {isRealTime ? 'LIVE UPDATES' : 'OFFLINE MODE'}
+            </div>
+            <div className="text-purple-300/90 flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
+              </svg>
+              {articles.length} articles loaded
+            </div>
+            {lastFetched && (
+              <div className="text-purple-300/90 flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Updated: {lastFetched.toLocaleTimeString()}
+              </div>
+            )}
+          </div>
+        </header>
+
+          {/* SIMPLIFICATION STATUS */}
+          {simplifying && (
+            <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-4 mb-6 max-w-2xl mx-auto">
+              <div className="flex items-center justify-center gap-3">
+                <div className="loading-spinner w-5 h-5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-yellow-300 font-medium">
+                  🧠 Simplifying articles for {modeConfig[mode].label} level...
+                </span>
+              </div>
+              <div className="text-center text-xs text-yellow-400 mt-2">
+                Using AI to make content more {mode === 'child' ? 'understandable for young readers' : mode === 'student' ? 'accessible for students' : 'detailed for researchers'}
+              </div>
+            </div>
+          )}
+
+          {/* REFRESH BUTTON */}
+          <div className="flex justify-center mb-8">
+            <button
+              onClick={fetchRealtimeNews}
+              disabled={loading || simplifying}
+              className="group relative flex items-center gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-full font-medium transition-all duration-200 shadow-lg hover:shadow-purple-500/20"
+            >
+              {loading ? (
+                <>
+                  <div className="loading-spinner w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <span>Fetching...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5 group-hover:rotate-180 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh News</span>
+                </>
+              )}
+              <span className="absolute -bottom-6 text-xs text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                Last updated: {lastFetched ? lastFetched.toLocaleTimeString() : 'Never'}
+              </span>
+            </button>
+          </div>
+
+          {/* SIMPLIFICATION STATUS */}
+          {simplifying && (
+            <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-4 mb-6 max-w-2xl mx-auto">
+              <div className="flex items-center justify-center gap-3">
+                <div className="loading-spinner w-5 h-5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-yellow-300 font-medium">
+                  🧠 Simplifying articles for {modeConfig[mode].label} level...
+                </span>
+              </div>
+              <div className="text-center text-xs text-yellow-400 mt-2">
+                Using HuggingFace AI • This may take 5-10 seconds
+              </div>
+            </div>
+          )}
+
+          {/* REFRESH BUTTON */}
+          <div className="text-center">
+            <button
+              onClick={fetchRealtimeNews}
+              disabled={loading || simplifying}
+              className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 text-white px-6 py-2 rounded-lg font-medium transition-all duration-200"
+            >
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <div className="loading-spinner w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  Fetching...
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  🔄 Refresh News
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ARTICLES GRID */}
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {articles.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="text-6xl mb-4">📰</div>
+            <h3 className="text-2xl font-bold text-white mb-2">No articles found</h3>
+            <p className="text-gray-400">Try refreshing to fetch the latest space news</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {articles.map((article, index) => (
+              <div
+                key={article.id}
+                className="bg-slate-800/50 backdrop-blur-sm rounded-xl overflow-hidden border border-purple-500/20 hover:border-purple-500/40 transition-all duration-300 hover:transform hover:scale-105"
+                style={{ animationDelay: `${index * 0.1}s` }}
+              >
+                {/* Article Header */}
+                <div className="p-6 border-b border-slate-700/50 bg-slate-800/70">
+                  <div className="flex items-start justify-between mb-3">
+                    <h3 className="text-xl font-bold text-white line-clamp-2 flex-1">
+                      {article.title}
+                    </h3>
+                    <div className="ml-3 text-xs bg-gradient-to-r from-purple-600 to-blue-600 text-white px-3 py-1.5 rounded-full whitespace-nowrap shadow-lg">
+                      {article.source}
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-wrap items-center gap-4 text-sm text-purple-300 mt-2">
+                    <span className="flex items-center">
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      {formatDate(article.publishedAt)}
+                    </span>
+                    <span className="flex items-center">
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      {modeConfig[mode].label} Level
+                    </span>
+                  </div>
+                </div>
+
+                {/* Article Content */}
+                <div className="p-6 bg-slate-800/30">
+                  {simplifiedContent[`${article.id}_${mode}`] ? (
+                    <div className="space-y-4">
+                      <div className="bg-slate-700/50 rounded-xl p-5 border-l-4 border-purple-500 shadow-lg">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1.5 rounded-full">
+                            <span className="text-lg">{modeConfig[mode].icon}</span>
+                            <span className="text-sm font-medium text-purple-300">
+                              AI Simplified for {modeConfig[mode].label} Level
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs bg-green-900/50 text-green-400 px-2.5 py-1 rounded-full">
+                            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            AI Processed
+                          </div>
+                        </div>
+                        
+                        <div 
+                          className="prose prose-invert max-w-none text-gray-300 leading-relaxed space-y-4"
+                          dangerouslySetInnerHTML={processContent(simplifiedContent[`${article.id}_${mode}`], `${article.id}_${mode}`)}
+                        />
+                        
+                        {(simplifiedContent[article.id]?.length > 300) && (
+                          <button
+                            onClick={() => toggleExpand(article.id)}
+                            className="mt-3 text-sm text-purple-400 hover:text-purple-300 font-medium flex items-center gap-1 transition-colors"
+                          >
+                            {expandedArticles[article.id] ? (
+                              <>
+                                <span>Show Less</span>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                              </>
+                            ) : (
+                              <>
+                                <span>Read More</span>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      
+                      {/* Original Content Toggle */}
+                      <div className="mt-2 text-right">
+                        <button 
+                          onClick={() => toggleExpand(`original-${article.id}`)}
+                          className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 ml-auto"
+                        >
+                          {expandedArticles[`original-${article.id}`] ? 'Hide' : 'Show'} Original Content
+                          <svg 
+                            className={`w-3 h-3 transition-transform ${expandedArticles[`original-${article.id}`] ? 'rotate-180' : ''}`} 
+                            fill="none" 
+                            stroke="currentColor" 
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                      </div>
+                      
+                      {/* Original Content */}
+                      {expandedArticles[`original-${article.id}`] && (
+                        <div className="mt-4 bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
+                          <h4 className="text-sm font-medium text-purple-300 mb-2 flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Original Content
+                          </h4>
+                          <div 
+                            className="prose prose-sm prose-invert max-w-none text-gray-400"
+                            dangerouslySetInnerHTML={processContent(article.description || article.content, `original-content-${article.id}`)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : simplifying ? (
+                    <div className="bg-slate-700/30 rounded-xl p-5 border-l-4 border-yellow-500/70">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="loading-spinner w-5 h-5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                        <div>
+                          <p className="text-sm font-medium text-yellow-300">Processing with AI</p>
+                          <p className="text-xs text-yellow-400/80">Simplifying for {modeConfig[mode].label} level...</p>
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        {[1, 2, 3].map((i) => (
+                          <div key={i} className="space-y-2">
+                            <div className="h-3 bg-slate-600/50 rounded-full animate-pulse" style={{ width: `${100 - (i * 20)}%` }}></div>
+                            <div className="h-3 bg-slate-600/30 rounded-full animate-pulse" style={{ width: `${90 - (i * 20)}%` }}></div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="bg-slate-700/30 rounded-xl p-5">
+                        <div 
+                          className="prose prose-invert max-w-none text-gray-300 leading-relaxed"
+                          dangerouslySetInnerHTML={processContent(article.description || article.content, article.id)}
+                        />
+                        
+                        {((article.description || article.content)?.length > 300) && (
+                          <button
+                            onClick={() => toggleExpand(article.id)}
+                            className="mt-3 text-sm text-purple-400 hover:text-purple-300 font-medium flex items-center gap-1 transition-colors"
+                          >
+                            {expandedArticles[article.id] ? (
+                              <>
+                                <span>Show Less</span>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                              </>
+                            ) : (
+                              <>
+                                <span>Read More</span>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div className="text-center py-3">
+                        <button
+                          onClick={() => setMode(mode === 'researcher' ? 'student' : mode === 'student' ? 'child' : 'researcher')}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-full text-sm font-medium transition-all duration-200 shadow-lg shadow-purple-500/20"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          Simplify for {mode === 'researcher' ? 'Student' : mode === 'student' ? 'Child' : 'Researcher'} Level
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Read Original Link */}
+                  <div className="mt-6 pt-4 border-t border-slate-700/50 flex justify-between items-center">
+                    <a
+                      href={article.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-purple-300 hover:text-white px-4 py-2 rounded-lg transition-all duration-200 text-sm font-medium"
+                    >
+                      <span>Read Full Article</span>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                    
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500">
+                        {new Date(article.publishedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      </span>
+                      <span className="text-xs text-slate-500">•</span>
+                      <span className="text-xs text-slate-500">
+                        {Math.ceil((article.description || article.content || '').length / 5 / 180)} min read
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Footer Info */}
+        <div className="text-center mt-12 text-sm text-purple-400">
+          <p>🌍 Real-time data from NASA & ISRO APIs • No database cache • Always fresh content</p>
+          <p className="mt-2">🧠 AI simplification powered by HuggingFace • {articles.length} articles loaded</p>
+          {lastFetched && (
+            <p className="mt-1 text-xs text-gray-500">
+              Last fetch: {lastFetched.toLocaleString()} • 
+              Status: {isRealTime ? 'LIVE' : 'OFFLINE'}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
